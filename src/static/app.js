@@ -15,8 +15,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const activityDescriptionInput = document.getElementById("activity-description");
   const activityScheduleInput = document.getElementById("activity-schedule");
   const activityMaxInput = document.getElementById("activity-max");
+  const editActivityForm = document.getElementById("edit-activity-form");
+  const editActivityNameInput = document.getElementById("edit-activity-name");
+  const editActivityDescriptionInput = document.getElementById("edit-activity-description");
+  const editActivityScheduleInput = document.getElementById("edit-activity-schedule");
+  const editActivityMaxInput = document.getElementById("edit-activity-max");
+  const cancelEditButton = document.getElementById("cancel-edit");
 
   let authMode = "login";
+  let currentUserRole = null;
+  let currentActivities = {};
+  let editingActivity = null;
 
   function getAuthToken() {
     return localStorage.getItem("activityAuthToken");
@@ -61,9 +70,10 @@ document.addEventListener("DOMContentLoaded", () => {
         throw new Error("Not authenticated");
       }
       const user = await response.json();
+      currentUserRole = user.role;
       userInfo.textContent = `Logged in as ${user.email} (${user.role})`;
       userInfo.classList.remove("hidden");
-      if (user.role === "admin") {
+      if (user.role === "admin" || user.role === "organizer") {
         adminContainer.classList.remove("hidden");
       } else {
         adminContainer.classList.add("hidden");
@@ -72,6 +82,7 @@ document.addEventListener("DOMContentLoaded", () => {
       clearAuthToken();
       userInfo.classList.add("hidden");
       adminContainer.classList.add("hidden");
+      currentUserRole = null;
       console.error("Auth session invalid:", error);
     }
   }
@@ -92,6 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <option value="">-- Select an activity --</option>
       `;
 
+      currentActivities = activities;
       Object.entries(activities).forEach(([name, details]) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
@@ -112,7 +124,8 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>`
             : `<p><em>No participants yet</em></p>`;
 
-        const adminControls = userInfo.textContent.includes("admin")
+        const isManager = currentUserRole === "admin" || currentUserRole === "organizer";
+        const adminControls = isManager
           ? `
             <div class="activity-admin-controls">
               <button class="edit-activity" data-activity="${name}">Edit</button>
@@ -212,32 +225,56 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function handleEditActivity(activity) {
-    const description = window.prompt("New description:");
-    if (description === null) return;
-    const schedule = window.prompt("New schedule:");
-    if (schedule === null) return;
-    const maxParticipants = window.prompt("New max participants:");
-    if (maxParticipants === null) return;
+  function handleEditActivity(activity) {
+    const activityData = currentActivities[activity];
+    if (!activityData) {
+      showMessage("Unable to load activity details for editing.", "error");
+      return;
+    }
 
-    const payload = {
-      description,
-      schedule,
-      max_participants: Number(maxParticipants),
-    };
+    editingActivity = activity;
+    editActivityNameInput.value = activity;
+    editActivityDescriptionInput.value = activityData.description;
+    editActivityScheduleInput.value = activityData.schedule;
+    editActivityMaxInput.value = activityData.max_participants;
+    editActivityForm.classList.remove("hidden");
+    window.scrollTo({ top: editActivityForm.offsetTop - 20, behavior: "smooth" });
+  }
+
+  editActivityForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!editingActivity) {
+      showMessage("No activity selected for editing.", "error");
+      return;
+    }
+
+    const description = editActivityDescriptionInput.value.trim();
+    const schedule = editActivityScheduleInput.value.trim();
+    const maxParticipants = Number(editActivityMaxInput.value);
+
+    if (!description || !schedule || maxParticipants <= 0) {
+      showMessage("Please fill all fields for the activity.", "error");
+      return;
+    }
 
     try {
-      const response = await fetch(`/activities/${encodeURIComponent(activity)}`, {
+      const response = await fetch(`/activities/${encodeURIComponent(editingActivity)}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           ...getAuthHeaders(),
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          description,
+          schedule,
+          max_participants: maxParticipants,
+        }),
       });
       const result = await response.json();
       if (response.ok) {
         showMessage(result.message, "success");
+        editActivityForm.classList.add("hidden");
+        editingActivity = null;
         fetchActivities();
       } else {
         showMessage(result.detail || "Failed to update activity", "error");
@@ -246,7 +283,12 @@ document.addEventListener("DOMContentLoaded", () => {
       showMessage("Failed to update activity. Please try again.", "error");
       console.error("Edit activity error:", error);
     }
-  }
+  });
+
+  cancelEditButton.addEventListener("click", () => {
+    editActivityForm.classList.add("hidden");
+    editingActivity = null;
+  });
 
   createActivityForm.addEventListener("submit", async (event) => {
     event.preventDefault();
