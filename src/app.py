@@ -108,6 +108,19 @@ class UserResponse(BaseModel):
     role: str
 
 
+class ActivityCreateRequest(BaseModel):
+    name: str
+    description: str
+    schedule: str
+    max_participants: int
+
+
+class ActivityUpdateRequest(BaseModel):
+    description: Optional[str] = None
+    schedule: Optional[str] = None
+    max_participants: Optional[int] = None
+
+
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
@@ -202,6 +215,64 @@ def get_me(current_user: Dict[str, str] = Depends(get_current_user)):
 @app.get("/activities")
 def get_activities():
     return activities
+
+
+@app.post("/activities")
+def create_activity(
+    request: ActivityCreateRequest,
+    current_user: Dict[str, str] = Depends(require_role("admin")),
+):
+    activity_name = request.name.strip()
+    if not activity_name:
+        raise HTTPException(status_code=400, detail="Activity name must be provided")
+
+    if activity_name in activities:
+        raise HTTPException(status_code=400, detail="Activity already exists")
+
+    activities[activity_name] = {
+        "description": request.description,
+        "schedule": request.schedule,
+        "max_participants": request.max_participants,
+        "participants": [],
+    }
+    return {"message": f"Activity '{activity_name}' created successfully"}
+
+
+@app.put("/activities/{activity_name}")
+def update_activity(
+    activity_name: str,
+    request: ActivityUpdateRequest,
+    current_user: Dict[str, str] = Depends(require_role("admin")),
+):
+    if activity_name not in activities:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    activity = activities[activity_name]
+    if request.description is not None:
+        activity["description"] = request.description
+    if request.schedule is not None:
+        activity["schedule"] = request.schedule
+    if request.max_participants is not None:
+        if request.max_participants < len(activity["participants"]):
+            raise HTTPException(
+                status_code=400,
+                detail="Max participants cannot be less than current participant count",
+            )
+        activity["max_participants"] = request.max_participants
+
+    return {"message": f"Activity '{activity_name}' updated successfully"}
+
+
+@app.delete("/activities/{activity_name}")
+def delete_activity(
+    activity_name: str,
+    current_user: Dict[str, str] = Depends(require_role("admin")),
+):
+    if activity_name not in activities:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    activities.pop(activity_name)
+    return {"message": f"Activity '{activity_name}' deleted successfully"}
 
 
 @app.post("/activities/{activity_name}/signup")
