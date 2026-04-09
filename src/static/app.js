@@ -24,6 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let authMode = "login";
   let currentUserRole = null;
+  let currentUserEmail = null;
   let currentActivities = {};
   let editingActivity = null;
 
@@ -71,6 +72,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       const user = await response.json();
       currentUserRole = user.role;
+      currentUserEmail = user.email;
       userInfo.textContent = `Logged in as ${user.email} (${user.role})`;
       userInfo.classList.remove("hidden");
       if (user.role === "admin" || user.role === "organizer") {
@@ -83,6 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
       userInfo.classList.add("hidden");
       adminContainer.classList.add("hidden");
       currentUserRole = null;
+      currentUserEmail = null;
       console.error("Auth session invalid:", error);
     }
   }
@@ -109,6 +112,7 @@ document.addEventListener("DOMContentLoaded", () => {
         activityCard.className = "activity-card";
 
         const spotsLeft = details.max_participants - details.participants.length;
+        const attendedCount = details.attended_count || 0;
         const participantsHTML =
           details.participants.length > 0
             ? `<div class="participants-section">
@@ -124,12 +128,16 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>`
             : `<p><em>No participants yet</em></p>`;
 
-        const isManager = currentUserRole === "admin" || currentUserRole === "organizer";
+        const isSignedUp = currentUserEmail && details.participants.includes(currentUserEmail);
+        const checkinButton = currentUserRole === "student" && isSignedUp ? `<button class="checkin-btn" data-activity="${name}">Check In</button>` : "";
+        const viewAttendanceButton = isManager ? `<button class="view-attendance-btn" data-activity="${name}">View Attendance (${attendedCount})</button>` : "";
+
         const adminControls = isManager
           ? `
             <div class="activity-admin-controls">
               <button class="edit-activity" data-activity="${name}">Edit</button>
               <button class="delete-activity" data-activity="${name}">Delete</button>
+              ${viewAttendanceButton}
             </div>
           `
           : "";
@@ -142,6 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="participants-container">
             ${participantsHTML}
           </div>
+          ${checkinButton}
           ${adminControls}
         `;
 
@@ -161,6 +170,12 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       document.querySelectorAll(".edit-activity").forEach((button) => {
         button.addEventListener("click", () => handleEditActivity(button.getAttribute("data-activity")));
+      });
+      document.querySelectorAll(".checkin-btn").forEach((button) => {
+        button.addEventListener("click", () => handleCheckin(button.getAttribute("data-activity")));
+      });
+      document.querySelectorAll(".view-attendance-btn").forEach((button) => {
+        button.addEventListener("click", () => handleViewAttendance(button.getAttribute("data-activity")));
       });
     } catch (error) {
       activitiesList.innerHTML =
@@ -204,10 +219,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function handleDeleteActivity(activity) {
+  async function handleCheckin(activity) {
     try {
-      const response = await fetch(`/activities/${encodeURIComponent(activity)}`, {
-        method: "DELETE",
+      const response = await fetch(`/activities/${encodeURIComponent(activity)}/checkin`, {
+        method: "POST",
         headers: {
           ...getAuthHeaders(),
         },
@@ -217,11 +232,31 @@ document.addEventListener("DOMContentLoaded", () => {
         showMessage(result.message, "success");
         fetchActivities();
       } else {
-        showMessage(result.detail || "Failed to delete activity", "error");
+        showMessage(result.detail || "Failed to check in", "error");
       }
     } catch (error) {
-      showMessage("Failed to delete activity. Please try again.", "error");
-      console.error("Delete activity error:", error);
+      showMessage("Failed to check in. Please try again.", "error");
+      console.error("Checkin error:", error);
+    }
+  }
+
+  async function handleViewAttendance(activity) {
+    try {
+      const response = await fetch(`/activities/${encodeURIComponent(activity)}/attendance`, {
+        headers: {
+          ...getAuthHeaders(),
+        },
+      });
+      const result = await response.json();
+      if (response.ok) {
+        const attendedList = result.attended.length > 0 ? result.attended.join(", ") : "No one has checked in yet.";
+        showMessage(`Attendance for ${activity}: ${attendedList} (${result.count} total)`, "info");
+      } else {
+        showMessage(result.detail || "Failed to fetch attendance", "error");
+      }
+    } catch (error) {
+      showMessage("Failed to fetch attendance. Please try again.", "error");
+      console.error("View attendance error:", error);
     }
   }
 
