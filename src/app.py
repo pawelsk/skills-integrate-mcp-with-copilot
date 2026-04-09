@@ -87,7 +87,8 @@ activities = {
     },
 }
 
-# In-memory auth store
+# In-memory attendance database
+attendance: Dict[str, list] = {}
 users: Dict[str, Dict[str, str]] = {}
 sessions: Dict[str, str] = {}
 
@@ -231,7 +232,12 @@ def get_me(current_user: Dict[str, str] = Depends(get_current_user)):
 
 @app.get("/activities")
 def get_activities():
-    return activities
+    # Include attendance info in the response
+    result = {}
+    for name, activity in activities.items():
+        attended_count = len(attendance.get(name, []))
+        result[name] = {**activity, "attended_count": attended_count}
+    return result
 
 
 @app.post("/activities")
@@ -336,3 +342,41 @@ def unregister_from_activity(
 
     activity["participants"].remove(email)
     return {"message": f"Unregistered {email} from {activity_name}"}
+
+
+@app.post("/activities/{activity_name}/checkin")
+def checkin_to_activity(
+    activity_name: str,
+    current_user: Dict[str, str] = Depends(get_current_user),
+):
+    """Check in to an activity (mark attendance)"""
+    if activity_name not in activities:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    email = current_user["email"]
+    activity = activities[activity_name]
+
+    if email not in activity["participants"]:
+        raise HTTPException(status_code=400, detail="You must be signed up for this activity to check in")
+
+    if activity_name not in attendance:
+        attendance[activity_name] = []
+
+    if email in attendance[activity_name]:
+        raise HTTPException(status_code=400, detail="Already checked in to this activity")
+
+    attendance[activity_name].append(email)
+    return {"message": f"Checked in {email} to {activity_name}"}
+
+
+@app.get("/activities/{activity_name}/attendance")
+def get_activity_attendance(
+    activity_name: str,
+    current_user: Dict[str, str] = Depends(require_roles("admin", "organizer")),
+):
+    """Get attendance list for an activity"""
+    if activity_name not in activities:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    attended = attendance.get(activity_name, [])
+    return {"activity": activity_name, "attended": attended, "count": len(attended)}
