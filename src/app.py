@@ -125,6 +125,15 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+def require_roles(*allowed_roles: str):
+    def _require_roles(current_user: Dict[str, str] = Depends(get_current_user)):
+        if current_user["role"] not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return current_user
+
+    return _require_roles
+
+
 def verify_password(password: str, hashed_password: str) -> bool:
     return hash_password(password) == hashed_password
 
@@ -164,6 +173,11 @@ def startup_event():
             "hashed_password": hash_password("admin123"),
             "role": "admin",
         }
+    if "organizer@mergington.edu" not in users:
+        users["organizer@mergington.edu"] = {
+            "hashed_password": hash_password("organizer123"),
+            "role": "organizer",
+        }
 
 
 @app.get("/")
@@ -178,8 +192,11 @@ def register(request: RegisterRequest):
         raise HTTPException(status_code=400, detail="User already exists")
 
     role = request.role.lower() if request.role else "student"
-    if role not in {"student", "admin"}:
+    if role not in {"student", "organizer", "admin"}:
         raise HTTPException(status_code=400, detail="Invalid role")
+
+    if role != "student":
+        raise HTTPException(status_code=403, detail="Cannot self-register as organizer or admin")
 
     users[email] = {
         "hashed_password": hash_password(request.password),
@@ -220,7 +237,7 @@ def get_activities():
 @app.post("/activities")
 def create_activity(
     request: ActivityCreateRequest,
-    current_user: Dict[str, str] = Depends(require_role("admin")),
+    current_user: Dict[str, str] = Depends(require_roles("admin", "organizer")),
 ):
     activity_name = request.name.strip()
     if not activity_name:
@@ -242,7 +259,7 @@ def create_activity(
 def update_activity(
     activity_name: str,
     request: ActivityUpdateRequest,
-    current_user: Dict[str, str] = Depends(require_role("admin")),
+    current_user: Dict[str, str] = Depends(require_roles("admin", "organizer")),
 ):
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -266,7 +283,7 @@ def update_activity(
 @app.delete("/activities/{activity_name}")
 def delete_activity(
     activity_name: str,
-    current_user: Dict[str, str] = Depends(require_role("admin")),
+    current_user: Dict[str, str] = Depends(require_roles("admin", "organizer")),
 ):
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
